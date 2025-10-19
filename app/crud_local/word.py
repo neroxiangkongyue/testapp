@@ -1,9 +1,9 @@
-# crud/word.py
+# crud/word_relation.py
 from sqlmodel import select, Session
 from typing import List, Optional
 
 from app.models.word import Word
-from app.schemas.word import WordCreate, WordUpdate
+from app.schemas.word_relation import WordCreate, WordUpdate
 from sqlalchemy import func
 
 

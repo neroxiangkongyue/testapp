@@ -3,7 +3,7 @@ from sqlmodel import select, Session
 from typing import List, Optional
 
 from app.models.word import WordDefinition
-from app.schemas.word import WordDefinitionCreate, WordDefinitionUpdate
+from app.schemas.word_relation import WordDefinitionCreate, WordDefinitionUpdate
 
 
 def create_definition(db: Session, definition: WordDefinitionCreate) -> WordDefinition:

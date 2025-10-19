@@ -1,177 +1,328 @@
-# crud/relation.py
 from collections import deque
 
-from sqlmodel import select, Session
-from typing import List, Optional, Tuple
-
-from app.models.relation import WordRelation
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
+from typing import List, Optional, Dict
+from datetime import datetime
+from app.models.relation import WordRelation, RelationType
 from app.models.word import Word
-from app.schemas.word import WordRelationCreate, WordRelationUpdate, GraphPath
+from app.schemas.relation import WordRelationCreate, WordRelationUpdate, RelationTypeCreate, RelationTypeUpdate
+from app.exceptions import NotFoundException, ValidationException
 
 
-def create_relation(db: Session, relation: WordRelationCreate) -> WordRelation:
+def create_relation(db: Session, relation_in: WordRelationCreate) -> WordRelation:
     """创建新关系"""
-    db_relation = WordRelation.model_validate(relation)
-    db.add(db_relation)
+    # 检查源单词和目标单词是否存在
+    source_word = db.query(Word).filter(Word.id == relation_in.source_word_id).first()
+    if not source_word:
+        raise NotFoundException("Source word not found")
+
+    target_word = db.query(Word).filter(Word.id == relation_in.target_word_id).first()
+    if not target_word:
+        raise NotFoundException("Target word not found")
+
+    # 检查源单词和目标单词是否相同
+    if relation_in.source_word_id == relation_in.target_word_id:
+        raise ValidationException("Source and target words cannot be the same")
+
+    # 检查是否已存在相同关系
+    existing = db.query(WordRelation).filter(
+        and_(
+            WordRelation.source_word_id == relation_in.source_word_id,
+            WordRelation.target_word_id == relation_in.target_word_id
+        )
+    ).first()
+
+    if existing:
+        raise ValidationException("Relation already exists")
+
+    # 创建关系
+    relation = WordRelation(
+        source_word_id=relation_in.source_word_id,
+        target_word_id=relation_in.target_word_id,
+        strength=relation_in.strength,
+        description=relation_in.description
+    )
+
+    db.add(relation)
     db.commit()
-    db.refresh(db_relation)
-    return db_relation
+    db.refresh(relation)
+    return relation
 
 
 def get_relation(db: Session, relation_id: int) -> Optional[WordRelation]:
-    """根据ID获取关系"""
-    return db.get(WordRelation, relation_id)
+    """获取单个关系"""
+    return db.query(WordRelation).filter(WordRelation.id == relation_id).first()
 
 
-def get_relations_by_word(db: Session, word_id: int) -> List[WordRelation]:
-    """获取单词的所有关系（出站）"""
-    statement = select(WordRelation).where(WordRelation.source_id == word_id)
-    return db.execute(statement).scalars().all()
+def get_relations_between_words(
+        db: Session,
+        source_id: int,
+        target_id: int
+) -> List[WordRelation]:
+    """获取两个单词之间的直接关系"""
+    return db.query(WordRelation).filter(
+        and_(
+            WordRelation.source_word_id == source_id,
+            WordRelation.target_word_id == target_id
+        )
+    ).all()
 
 
-def get_relations_to_word(db: Session, word_id: int) -> List[WordRelation]:
-    """获取指向单词的所有关系（入站）"""
-    statement = select(WordRelation).where(WordRelation.target_id == word_id)
-    return db.execute(statement).scalars().all()
+def get_word_outgoing_relations(
+        db: Session,
+        word_id: int,
+        skip: int = 0,
+        limit: int = 100
+) -> List[WordRelation]:
+    """获取单词的所有出站关系"""
+    return db.query(WordRelation).filter(
+        WordRelation.source_word_id == word_id
+    ).offset(skip).limit(limit).all()
 
 
-def update_relation(db: Session, relation_id: int, relation_update: WordRelationUpdate) -> Optional[WordRelation]:
+def get_word_incoming_relations(
+        db: Session,
+        word_id: int,
+        skip: int = 0,
+        limit: int = 100
+) -> List[WordRelation]:
+    """获取单词的所有入站关系"""
+    return db.query(WordRelation).filter(
+        WordRelation.target_word_id == word_id
+    ).offset(skip).limit(limit).all()
+
+
+def get_word_all_relations(
+        db: Session,
+        word_id: int,
+        skip: int = 0,
+        limit: int = 100
+) -> List[WordRelation]:
+    """获取单词的所有关系"""
+    return db.query(WordRelation).filter(
+        or_(
+            WordRelation.source_word_id == word_id,
+            WordRelation.target_word_id == word_id
+        )
+    ).offset(skip).limit(limit).all()
+
+
+def update_relation(
+        db: Session,
+        relation_id: int,
+        relation_in: WordRelationUpdate
+) -> Optional[WordRelation]:
     """更新关系"""
-    db_relation = db.get(WordRelation, relation_id)
-    if not db_relation:
+    relation = get_relation(db, relation_id)
+    if not relation:
         return None
 
-    update_data = relation_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(db_relation, field, value)
+    if relation_in.strength is not None:
+        relation.strength = relation_in.strength
 
-    db.add(db_relation)
+    if relation_in.description is not None:
+        relation.description = relation_in.description
+
+    relation.updated_at = datetime.utcnow()
+
+    db.add(relation)
     db.commit()
-    db.refresh(db_relation)
-    return db_relation
+    db.refresh(relation)
+    return relation
 
 
 def delete_relation(db: Session, relation_id: int) -> bool:
     """删除关系"""
-    db_relation = db.get(WordRelation, relation_id)
-    if not db_relation:
+    relation = get_relation(db, relation_id)
+    if not relation:
         return False
 
-    db.delete(db_relation)
+    # 删除关联的类型
+    db.query(RelationType).filter(RelationType.relation_id == relation_id).delete()
+
+    # 删除关系
+    db.delete(relation)
     db.commit()
     return True
 
 
-def get_relation_by_word(db: Session, relation: WordRelationCreate) -> Optional[WordRelation]:
-    statement = select(WordRelation).where(
-        (WordRelation.source_id == relation.source_id) &
-        (WordRelation.target_id == relation.target_id) &
-        (WordRelation.relation_type == relation.relation_type)
+def create_relation_type(db: Session, type_in: RelationTypeCreate) -> RelationType:
+    """创建新关系类型"""
+    # 检查关联的关系是否存在
+    relation = get_relation(db, type_in.relation_id)
+    if not relation:
+        raise NotFoundException("Relation not found")
+
+    # 检查类型名称是否唯一
+    existing = db.query(RelationType).filter(
+        RelationType.type_name == type_in.type_name
+    ).first()
+
+    if existing:
+        raise ValidationException("Relation type name already exists")
+
+    # 创建关系类型
+    relation_type = RelationType(
+        relation_id=type_in.relation_id,
+        type_name=type_in.type_name,
+        category=type_in.category,
+        description=type_in.description
     )
-    existing_relation = db.execute(statement).scalars().first()
-    return existing_relation
+
+    db.add(relation_type)
+    db.commit()
+    db.refresh(relation_type)
+    return relation_type
 
 
-def get_word_relations_between(db: Session, source_id: int, target_id: int):
-    return db.execute(
-        select(WordRelation)
-        .where(
-            # or_(
-            #     # 正常方向：source→target
-            (WordRelation.source_id == source_id) & (WordRelation.target_id == target_id),
-            # 反向方向：target→source
-            # (WordRelation.source_id == target_id) & (WordRelation.target_id == source_id)
-            # )
-        )
-    ).scalar()  # 使用 scalar() 获取单个结果
+def get_relation_type(db: Session, type_id: int) -> Optional[RelationType]:
+    """获取关系类型详情"""
+    return db.query(RelationType).filter(RelationType.id == type_id).first()
 
 
-def get_word_relations(session: Session, word_id: int) -> List[Tuple[int, int, str]]:
-    """获取单词的所有关系（出度和入度）"""
-    # 获取出度关系
-    out_relations = session.execute(
-        select(WordRelation)
-        .where(WordRelation.source_id == word_id)
-    ).scalars().all()
-
-    # 获取入度关系
-    in_relations = session.execute(
-        select(WordRelation)
-        .where(WordRelation.target_id == word_id)
-    ).scalars().all()
-
-    # 格式化结果：(目标单词ID, 关系ID, 关系类型)
-    relations = []
-    for rel in out_relations:
-        relations.append((rel.target_id, rel.id, rel.relation_type))
-
-    for rel in in_relations:
-        relations.append((rel.source_id, rel.id, rel.relation_type))
-
-    return relations
-
-
-def find_paths(
+def get_relation_types_by_relation(
         db: Session,
-        source_id: int,
-        target_id: int,
-        max_paths: int = 10,
-        min_length: int = 1,
-        max_length: int = 10
-) -> List[GraphPath]:
-    """查找两个单词之间的所有路径
+        relation_id: int
+) -> List[RelationType]:
+    """获取关系关联的所有类型"""
+    return db.query(RelationType).filter(
+        RelationType.relation_id == relation_id
+    ).all()
 
-    使用BFS算法查找从source_id到target_id的所有路径
-    路径长度在min_length和max_length之间
-    最多返回max_paths条路径
-    """
-    # 验证单词存在
-    source_word = db.get(Word, source_id)
-    target_word = db.get(Word, target_id)
 
-    if not source_word or not target_word:
-        raise ValueError("单词不存在")
+def update_relation_type(
+        db: Session,
+        type_id: int,
+        type_in: RelationTypeUpdate
+) -> Optional[RelationType]:
+    """更新关系类型"""
+    relation_type = get_relation_type(db, type_id)
+    if not relation_type:
+        return None
 
-    # 如果源和目标相同，返回空路径
-    if source_id == target_id:
-        return [GraphPath(path=[source_id], relations=[], length=0)]
+    if type_in.type_name is not None:
+        # 检查新名称是否唯一
+        existing = db.query(RelationType).filter(
+            and_(
+                RelationType.type_name == type_in.type_name,
+                RelationType.id != type_id
+            )
+        ).first()
 
-    # 使用BFS算法查找路径
-    paths = []
-    queue = deque([(source_id, [source_id], [], 0)])  # (当前节点, 路径, 关系, 长度)
+        if existing:
+            raise ValidationException("Relation type name already exists")
 
-    while queue and len(paths) < max_paths:
-        current_node, path, relations, length = queue.popleft()
+        relation_type.type_name = type_in.type_name
 
-        # 如果路径长度超过最大值，跳过
-        if length >= max_length:
+    if type_in.category is not None:
+        relation_type.category = type_in.category
+
+    if type_in.description is not None:
+        relation_type.description = type_in.description
+
+    relation_type.updated_at = datetime.utcnow()
+
+    db.add(relation_type)
+    db.commit()
+    db.refresh(relation_type)
+    return relation_type
+
+
+def delete_relation_type(db: Session, type_id: int) -> bool:
+    """删除关系类型"""
+    relation_type = get_relation_type(db, type_id)
+    if not relation_type:
+        return False
+
+    db.delete(relation_type)
+    db.commit()
+    return True
+
+
+def get_word_graph(
+        db: Session,
+        word_id: int,
+        max_level: int = 3,
+        max_nodes: int = 100
+) -> Dict[str, List]:
+    """获取单词的关系图数据"""
+    # 验证单词是否存在
+    center_word = db.query(Word).filter(Word.id == word_id).first()
+    if not center_word:
+        raise NotFoundException("Center word not found")
+
+    # 存储节点和边
+    nodes = []
+    edges = []
+
+    # 添加中心节点
+    nodes.append({
+        "id": word_id,
+        "word": center_word.word,
+        "level": 0
+    })
+
+    # 使用队列进行 BFS
+    queue = deque()
+    queue.append((word_id, 0))  # (单词ID, 层级)
+
+    visited = {word_id}
+
+    while queue and len(nodes) < max_nodes:
+        current_id, level = queue.popleft()
+
+        # 如果超过最大层级
+        if level >= max_level:
             continue
 
-        # 获取当前节点的所有关系
-        current_relations = get_word_relations(db, current_node)
+        # 获取当前单词的所有关系
+        relations = get_word_all_relations(db, current_id, 0, 100)
 
-        for next_node, rel_id, rel_type in current_relations:
-            # 避免循环路径
-            if next_node in path:
+        for relation in relations:
+            # 确定邻居节点
+            if relation.source_word_id == current_id:
+                neighbor_id = relation.target_word_id
+            else:
+                neighbor_id = relation.source_word_id
+
+            # 如果邻居节点已访问过，只添加边
+            if neighbor_id in visited:
+                edges.append({
+                    "source": current_id,
+                    "target": neighbor_id,
+                    "relation_id": relation.id,
+                    "strength": relation.strength
+                })
                 continue
 
-            # 创建新的路径
-            new_path = path + [next_node]
-            new_relations = relations + [rel_id]
-            new_length = length + 1
+            # 获取邻居单词
+            neighbor_word = db.query(Word).filter(Word.id == neighbor_id).first()
+            if not neighbor_word:
+                continue
 
-            # 如果找到目标节点
-            if next_node == target_id:
-                if min_length <= new_length <= max_length:
-                    paths.append(GraphPath(
-                        path=new_path,
-                        relations=new_relations,
-                        length=new_length
-                    ))
-                    if len(paths) >= max_paths:
-                        break
-            else:
-                # 将新路径加入队列
-                queue.append((next_node, new_path, new_relations, new_length))
+            # 添加新节点
+            nodes.append({
+                "id": neighbor_id,
+                "word": neighbor_word.word,
+                "level": level + 1
+            })
 
-    return paths
+            # 添加边
+            edges.append({
+                "source": current_id,
+                "target": neighbor_id,
+                "relation_id": relation.id,
+                "strength": relation.strength
+            })
+
+            # 标记为已访问
+            visited.add(neighbor_id)
+
+            # 添加邻居到队列
+            queue.append((neighbor_id, level + 1))
+
+    return {
+        "nodes": nodes,
+        "edges": edges
+    }

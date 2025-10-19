@@ -2,7 +2,7 @@
 from sqlmodel import select, Session
 from typing import List, Optional
 from app.models.word import WordForm
-from app.schemas.word import WordFormCreate, WordFormUpdate
+from app.schemas.word_relation import WordFormCreate, WordFormUpdate
 
 
 def create_form(db: Session, form: WordFormCreate) -> WordForm:
