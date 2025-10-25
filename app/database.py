@@ -1,64 +1,104 @@
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import create_engine, SQLModel, Session
 from contextlib import contextmanager
-import os
 from typing import Generator
 
-# 数据库配置
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///vocab5.db")
+# 导入配置类
+from app.config import settings
+
+
+
+def get_database_engine():
+    """
+    根据配置创建数据库引擎
+
+    根据不同的环境使用不同的数据库配置
+    """
+    database_url = settings.DATABASE_URL
+
+    if settings.DATABASE_TYPE == "sqlite":
+        # SQLite 配置
+        engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            echo=settings.DEBUG  # 开发环境显示SQL日志
+        )
+    else:
+        # MySQL 配置
+        engine = create_engine(
+            database_url,
+            pool_pre_ping=True,  # 连接前ping检测
+            pool_recycle=300,  # 连接回收时间
+            echo=settings.DEBUG  # 开发环境显示SQL日志
+        )
+
+    return engine
+
 
 # 创建数据库引擎
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-    echo=True  # 开发时开启SQL日志
-)
+engine = get_database_engine()
 
 # 创建会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-# 修复：使用 contextmanager 创建会话上下文
 @contextmanager
 def get_db_session():
-    """提供数据库会话的上下文管理器（用于非FastAPI场景）"""
+    """
+    数据库会话上下文管理器（用于非FastAPI场景）
+
+    使用示例：
+    with get_db_session() as session:
+        # 使用session进行数据库操作
+        user = session.get(User, 1)
+    """
     session = SessionLocal()
     try:
         yield session
-        session.commit()
+        session.commit()  # 成功时提交事务
     except Exception as e:
-        session.rollback()
+        session.rollback()  # 异常时回滚事务
         raise e
     finally:
-        session.close()
+        session.close()  # 确保会话关闭
 
 
-# 修复：创建适合FastAPI的依赖项
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI 依赖项，提供数据库会话"""
+    """
+    FastAPI 依赖项，提供数据库会话
+
+    在FastAPI路由中使用：
+    @app.get("/users/{user_id}")
+    def get_user(user_id: int, db: Session = Depends(get_db)):
+        user = db.get(User, user_id)
+        return user
+    """
     db = SessionLocal()
     try:
         yield db
-        db.commit()
+        db.commit()  # 请求成功完成时提交
     except Exception:
-        db.rollback()
+        db.rollback()  # 发生异常时回滚
         raise
     finally:
-        db.close()
+        db.close()  # 请求结束时关闭连接
 
 
 def create_db_tables():
     """创建所有数据库表"""
-    print("Creating database tables...")
+    print(f"创建数据库表，环境: {settings.APP_ENV}")
     SQLModel.metadata.create_all(engine)
-    print("Database tables created successfully!")
+    print("数据库表创建成功!")
 
 
-def drop_db_and_tables():
+def drop_db_tables():
     """删除所有数据库表（仅用于开发和测试）"""
-    print("Dropping database tables...")
+    if settings.APP_ENV == "production":
+        raise Exception("生产环境禁止删除数据库表!")
+
+    print("删除数据库表...")
     SQLModel.metadata.drop_all(engine)
-    print("Database tables dropped successfully!")
+    print("数据库表删除成功!")
 
 
 def init_db():

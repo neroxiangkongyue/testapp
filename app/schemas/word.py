@@ -1,137 +1,23 @@
-# schemas/word.py
-import json
-import re
+# app/schemas/word.py
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, validator
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, field_validator, validator
-from enum import Enum
+from app.schemas.enums import AccentType, PartOfSpeechAbbr, TagType
 
 
-# 枚举定义
-class PartOfSpeech(str, Enum):
-    NOUN = "noun"
-    VERB = "verb"
-    ADJECTIVE = "adjective"
-    ADVERB = "adverb"
-    PREPOSITION = "preposition"
-    CONJUNCTION = "conjunction"
-    PRONOUN = "pronoun"
-    INTERJECTION = "interjection"
-    DETERMINER = "determiner"
-    PHRASAL_VERB = "phrasal_verb"
-    IDIOM = "idiom"
+# 基础Schemas
+from app.schemas.enums import FormType
 
 
-class FormType(str, Enum):
-    PLURAL = "plural"
-    PAST_TENSE = "past_tense"
-    PAST_PARTICIPLE = "past_participle"
-    PRESENT_PARTICIPLE = "present_participl"
-    THIRD_PERSON_SINGULAR = "third_person_singular"
-    COMPARATIVE = "comparative"
-    SUPERLATIVE = "superlative"
-    BASE_FORM = "base_form"
-
-
-class AccentType(str, Enum):
-    US = "us"
-    UK = "uk"
-    AU = "au"
-    CA = "ca"
-
-
-class RelationType(str, Enum):
-    SYNONYM = "synonym"
-    ANTONYM = "antonym"
-    DERIVATIVE = "derivative"
-    HYPERNYM = "hypernym"
-    HYPONYM = "hyponym"
-    HOLONYM = "holonym"
-    MERONYM = "meronym"
-
-
-# 基础模型
-class WordBase(BaseModel):
-    word: str
-    normalized_word: str
-    length: int = 0
-    frequency_rank: Optional[int] = None
-    difficulty_level_id: int = 1
-    is_common: bool = True
-    tags: Optional[List[str]] = None
-    etymology: Optional[str] = None
-    description: str = ""
-
-    @field_validator('word')
-    def word_must_be_english_only(cls, v):
-        # ✅ 允许：英文字母、空格、撇号、连字符
-        if not re.fullmatch(r"^[a-zA-Z\s'-]+$", v):
-            raise ValueError("word 只能包含英文字母（a-z, A-Z）、空格、撇号 (') 或连字符 (-)")
-        return v
-
-# 创建模型
-class WordCreate(WordBase):
-    pass
-
-
-# 更新模型
-class WordUpdate(BaseModel):
-    word: Optional[str] = None
-    normalized_word: Optional[str] = None
-    length: Optional[int] = None
-    frequency_rank: Optional[int] = None
-    difficulty_level_id: Optional[int] = None
-    is_common: Optional[bool] = None
-    tags: Optional[List[str]] = None
-    etymology: Optional[str] = None
-    description: str = ""
-
-# 响应模型
-class WordRead(WordBase):
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-        # 添加自定义验证器来处理tags字段
-        @field_validator('tags', mode='before')
-        @classmethod
-        def validate_tags(cls, v):
-            if isinstance(v, str):
-                # 如果是从数据库读取的JSON字符串，则解析它
-                return json.loads(v)
-            return v
-
-
-# 释义模型
 class WordDefinitionBase(BaseModel):
-    part_of_speech: PartOfSpeech
+    part_of_speech: PartOfSpeechAbbr
     definition: str
     definition_cn: str
-    order: int = 0
-    domains: Optional[List[str]] = None
+    order: int = Field(ge=1, default=1)
+    domains_json: Optional[str] = None
     example_usage: Optional[str] = None
 
 
-class WordDefinitionCreate(WordDefinitionBase):
-    word_id: int
-
-
-class WordDefinitionRead(WordDefinitionBase):
-    id: int
-    word_id: int
-
-    class Config:
-        from_attributes = True
-
-
-class WordDefinitionUpdate(WordDefinitionBase):
-    pass
-
-
-# 例句模型
 class ExampleBase(BaseModel):
     sentence: str
     translation: str
@@ -139,46 +25,11 @@ class ExampleBase(BaseModel):
     context: Optional[str] = None
 
 
-class ExampleCreate(ExampleBase):
-    word_id: int
-
-
-class ExampleRead(ExampleBase):
-    id: int
-    word_id: int
-
-    class Config:
-        from_attributes = True
-
-
-class ExampleUpdate(ExampleBase):
-    pass
-
-
-# 词形变化模型
 class WordFormBase(BaseModel):
     form_type: FormType
     form_word: str
-    is_standard: bool = True
 
 
-class WordFormCreate(WordFormBase):
-    word_id: int
-
-
-class WordFormRead(WordFormBase):
-    id: int
-    word_id: int
-
-    class Config:
-        from_attributes = True
-
-
-class WordFormUpdate(WordFormBase):
-    pass
-
-
-# 发音模型
 class WordPronunciationBase(BaseModel):
     accent: AccentType
     audio_url: str
@@ -187,54 +38,252 @@ class WordPronunciationBase(BaseModel):
     audio_quality: Optional[str] = None
 
 
+class TagBase(BaseModel):
+    name: str
+    type: TagType = TagType.SYSTEM
+    description: Optional[str] = None
+
+
+# 创建Schemas
+class WordDefinitionCreate(WordDefinitionBase):
+    pass
+
+
+class ExampleCreate(ExampleBase):
+    pass
+
+
+class WordFormCreate(WordFormBase):
+    pass
+
+
 class WordPronunciationCreate(WordPronunciationBase):
+    pass
+
+
+class TagCreate(TagBase):
+    pass
+
+
+# 更新Schemas
+class WordDefinitionUpdate(BaseModel):
+    part_of_speech: Optional[PartOfSpeechAbbr] = None
+    definition: Optional[str] = None
+    definition_cn: Optional[str] = None
+    order: Optional[int] = Field(None, ge=1)
+    domains_json: Optional[str] = None
+    example_usage: Optional[str] = None
+
+
+class ExampleUpdate(BaseModel):
+    sentence: Optional[str] = None
+    translation: Optional[str] = None
+    source: Optional[str] = None
+    context: Optional[str] = None
+
+
+class WordFormUpdate(BaseModel):
+    form_type: Optional[str] = None
+    form_word: Optional[str] = None
+
+
+class WordPronunciationUpdate(BaseModel):
+    accent: Optional[AccentType] = None
+    audio_url: Optional[str] = None
+    phonetic: Optional[str] = None
+    voice_actor: Optional[str] = None
+    audio_quality: Optional[str] = None
+
+
+class TagUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[TagType] = None
+    description: Optional[str] = None
+
+
+# 读取Schemas
+class WordDefinitionRead(WordDefinitionBase):
+    id: int
     word_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ExampleRead(ExampleBase):
+    id: int
+    word_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WordFormRead(WordFormBase):
+    id: int
+    word_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class WordPronunciationRead(WordPronunciationBase):
     id: int
     word_id: int
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class WordPronunciationUpdate(WordPronunciationBase):
-    pass
-
-
-# 关系模型
-class WordRelationBase(BaseModel):
-    relation_type: RelationType
-    strength: Optional[float] = 1.0
+class TagRead(TagBase):
+    id: int
     created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# 单词的Schemas
+class WordBase(BaseModel):
+    word: str
+    frequency_rank: Optional[int] = None
+    difficulty_level: Optional[float] = Field(None, ge=1, le=5)
+    is_common: bool = True
+    etymology: Optional[str] = None
     description: str = ""
 
-class WordRelationCreate(BaseModel):
-    source_id: int
-    target_id: int
-    relation_type: RelationType
-    strength: Optional[float] = 1.0
+
+class WordCreate(WordBase):
+    definitions: List[WordDefinitionCreate] = []
+    examples: List[ExampleCreate] = []
+    forms: List[WordFormCreate] = []
+    pronunciations: List[WordPronunciationCreate] = []
+    tags: List[TagCreate] = []  # 标签名称列表
 
 
-class WordRelationRead(WordRelationBase):
+class WordUpdate(BaseModel):
+    word: Optional[str] = None
+    frequency_rank: Optional[int] = None
+    difficulty_level: Optional[float] = Field(None, ge=1, le=5)
+    is_common: Optional[bool] = None
+    etymology: Optional[str] = None
+    description: Optional[str] = None
+
+
+class WordRead(WordBase):
     id: int
-    source_id: int
-    target_id: int
+    normalized_word: str
+    length: int
+    view_count: int
+    known_count: int
+    unknown_count: int
+    uncertain_count: int
+    created_at: datetime
+    updated_at: datetime
+    tags: List[str] = []  # 标签名称列表
+
+    definitions: List[WordDefinitionRead] = []
+    examples: List[ExampleRead] = []
+    forms: List[WordFormRead] = []
+    pronunciations: List[WordPronunciationRead] = []
 
     class Config:
         from_attributes = True
 
 
-class WordRelationUpdate(WordRelationBase):
-    pass
-
-
-class GraphPath(BaseModel):
-    """表示两个单词之间的路径"""
-    path: List[int]  # 单词ID的列表，表示路径
-    relations: List[Optional[int]]  # 关系ID的列表，表示路径上的关系
-    length: int  # 路径长度
+# 用于搜索和列表的简化Schema
+class WordSimple(BaseModel):
+    id: int
+    word: str
+    normalized_word: str
+    length: int
+    frequency_rank: Optional[int]
+    difficulty_level: Optional[float]
+    is_common: bool
 
     class Config:
         from_attributes = True
+
+
+# 用于批量操作的Schemas
+class BulkWordCreate(BaseModel):
+    words: List[WordCreate]
+
+
+class BulkWordUpdate(BaseModel):
+    updates: List[Dict[str, Any]]  # 包含word_text和update_data的列表
+
+
+class BulkWordDelete(BaseModel):
+    word_texts: List[str]
+
+
+# 用于统计和报告的Schemas
+class WordStats(BaseModel):
+    total_words: int
+    common_words: int
+    average_difficulty: float
+    total_views: int
+    total_known: int
+    total_unknown: int
+    total_uncertain: int
+
+
+class WordFrequencyReport(BaseModel):
+    word: str
+    frequency_rank: Optional[int]
+    view_count: int
+    known_count: int
+    unknown_count: int
+    uncertain_count: int
+    accuracy_rate: float
+
+
+# 用于搜索建议的Schema
+class SearchSuggestion(BaseModel):
+    word: str
+    normalized_word: str
+    length: int
+
+    class Config:
+        from_attributes = True
+
+
+# 用于API响应的通用Schema
+class APIResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[Dict[str, Any]] = None
+
+
+# 用于分页结果的Schema
+class PaginatedResponse(BaseModel):
+    items: List[Any]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+# 用于错误响应的Schema
+class ErrorResponse(BaseModel):
+    detail: str
+    code: Optional[str] = None
+
+
+# 用于验证单词格式的Schema
+class WordValidation(BaseModel):
+    word: str
+    is_valid: bool
+    normalized_word: str
+    suggestions: Optional[List[str]] = None
+
+

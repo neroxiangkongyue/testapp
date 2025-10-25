@@ -2,7 +2,7 @@
 from sqlmodel import select, Session
 from typing import List, Optional
 from app.models.word import Example
-from app.schemas.word import ExampleCreate, ExampleUpdate
+from app.schemas.word_relation import ExampleCreate, ExampleUpdate
 
 
 def create_example(db: Session, example: ExampleCreate) -> Example:

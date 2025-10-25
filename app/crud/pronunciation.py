@@ -2,7 +2,7 @@
 from sqlmodel import select, Session
 from typing import List, Optional
 from app.models.word import WordPronunciation
-from app.schemas.word import WordPronunciationCreate, WordPronunciationUpdate
+from app.schemas.word_relation import WordPronunciationCreate, WordPronunciationUpdate
 
 
 def create_pronunciation(db: Session, pronunciation: WordPronunciationCreate) -> WordPronunciation:
